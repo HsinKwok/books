@@ -1,0 +1,32 @@
+{
+  "name": "book",
+  "main": "src/index.tsx",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./public",
+    // 静态目录里没有 HTML，关掉自动 .html 补全与尾斜杠跳转，少一次资产查找
+    "html_handling": "none",
+    "not_found_handling": "none"
+  },
+  // 仓库里提交的是占位符，部署前换成自己账号下 D1 的 database_id（见 README）
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "book",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // 可选：封面上传到 R2；没创建桶时可先删掉这一段，改用外链
+  "r2_buckets": [
+    {
+      "binding": "COVERS",
+      "bucket_name": "book-covers"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    // 只采样 10% 的请求做链路追踪，降低日志量
+    "head_sampling_rate": 0.1
+  }
+}

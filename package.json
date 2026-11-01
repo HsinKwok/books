@@ -1,0 +1,27 @@
+{
+  "name": "book",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/predeploy.mjs",
+    "dev": "node --use-system-ca node_modules/wrangler/bin/wrangler.js dev",
+    "predev": "node scripts/predeploy.mjs",
+    "deploy": "wrangler deploy",
+    "predeploy": "node scripts/predeploy.mjs",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "wrangler d1 migrations apply book --local",
+    "db:migrate:remote": "wrangler d1 migrations apply book --remote",
+    "db:backfill-html": "node scripts/backfill-body-html.mjs",
+    "seed:gen": "node scripts/seed.mjs",
+    "data:stress": "node scripts/stress-seed.mjs",
+    "stress:run": "node scripts/stress.mjs"
+  },
+  "dependencies": {
+    "hono": "^4.6.14"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261031.1",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.156.0"
+  }
+}

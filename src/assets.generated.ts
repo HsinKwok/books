@@ -1,0 +1,47 @@
+// 由 scripts/predeploy.mjs 生成，请勿手改；dev / deploy 前会自动重新生成
+const ASSETS: Record<string, string> = {
+  '/app.js': '/app.4e715541.js',
+  '/css/admin.css': '/css/admin.6781c53c.css',
+  '/css/base.css': '/css/base.e7920bb0.css',
+  '/css/reading.css': '/css/reading.086e8847.css',
+  '/css/site.css': '/css/site.16843f24.css',
+  '/js/admin.js': '/js/admin.ec3129c1.js',
+  '/js/admin/book-form.js': '/js/admin/book-form.5ef41147.js',
+  '/js/admin/books.js': '/js/admin/books.1607c096.js',
+  '/js/admin/bulk.js': '/js/admin/bulk.77398910.js',
+  '/js/admin/categories.js': '/js/admin/categories.ca28c25d.js',
+  '/js/admin/chapter.js': '/js/admin/chapter.1853e823.js',
+  '/js/admin/chapters.js': '/js/admin/chapters.4f360e08.js',
+  '/js/admin/confirm.js': '/js/admin/confirm.74e18277.js',
+  '/js/admin/discussions.js': '/js/admin/discussions.85c83303.js',
+  '/js/admin/import.js': '/js/admin/import.7b22b51a.js',
+  '/js/admin/menu.js': '/js/admin/menu.f2fbb798.js',
+  '/js/admin/overview.js': '/js/admin/overview.1424afeb.js',
+  '/js/admin/tabs.js': '/js/admin/tabs.65555c47.js',
+  '/js/admin/users.js': '/js/admin/users.112a71ca.js',
+  '/js/base.js': '/js/base.b5803dbd.js',
+  '/js/book-talks.js': '/js/book-talks.9b067361.js',
+  '/js/book-toc.js': '/js/book-toc.e7b6164b.js',
+  '/js/chapter-page.js': '/js/chapter-page.205a371d.js',
+  '/js/core.js': '/js/core.37bd6f84.js',
+  '/js/discuss.js': '/js/discuss.e79600af.js',
+  '/js/feed-more.js': '/js/feed-more.6ed7854e.js',
+  '/js/home.js': '/js/home.6d6bb8ad.js',
+  '/js/markdown-editor.js': '/js/markdown-editor.1ed13ac7.js',
+  '/js/markdown.js': '/js/markdown.cb305689.js',
+  '/js/pager.js': '/js/pager.a079e350.js',
+  '/js/read-stats.js': '/js/read-stats.ae1b71cc.js',
+  '/js/reading.js': '/js/reading.a2a9b0c4.js',
+  '/js/related.js': '/js/related.2cae55e9.js',
+  '/js/search-page.js': '/js/search-page.5fa28782.js',
+  '/js/search.js': '/js/search.9c5ba685.js',
+  '/js/settings.js': '/js/settings.1ff64651.js',
+  '/js/shelf.js': '/js/shelf.a5a2f28e.js',
+  '/js/talks.js': '/js/talks.8572ada5.js',
+  '/js/toc.js': '/js/toc.10c7b86d.js',
+};
+
+/** 给静态资源加上内容版本号，配合 public/_headers 的长缓存；未收录的路径原样返回 */
+export function asset(path: string): string {
+  return ASSETS[path] ?? path;
+}

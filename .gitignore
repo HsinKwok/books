@@ -1,0 +1,11 @@
+node_modules/
+.wrangler/
+.dryrun/
+.screenshots/
+.trae/
+dist/
+.dev.vars
+
+# 构建产物：scripts/predeploy.mjs 每次构建都会重新生成（带 8 位哈希的压缩副本）
+public/**/*.[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].js
+public/**/*.[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].css
