@@ -1074,6 +1074,24 @@ td.admin-row-actions {
   cursor: not-allowed;
 }
 
+/* 面板头里的批量条：跟标题同一行，不再单独占一行 */
+.admin-panel-head > .admin-bulk {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.admin-panel-head > .admin-bulk .admin-bulk-actions {
+  margin-left: 0;
+}
+
+.admin-panel-head .admin-check {
+  font-size: 12px;
+}
+
 .admin-check-item {
   width: 14px;
   height: 14px;

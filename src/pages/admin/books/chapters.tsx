@@ -23,8 +23,6 @@ export function ChapterTable({
 
   return (
     <>
-      {/* 批量条：勾选章节后一次删除，前端只管提交 */}
-      <BulkBar unit="章" actions={[{ key: 'delete', label: '删除', danger: true }]} />
       <table class="admin-table">
         <thead>
           <tr>
@@ -129,9 +127,10 @@ export function ChapterPanel({
   canImport: boolean;
 }) {
   return (
-    <section class="admin-panel">
+    <section class="admin-panel" id="chapters-panel" data-book-id={String(book.id)}>
       <div class="admin-panel-head">
         <h2>章节 · {total}</h2>
+        <BulkBar unit="章" actions={[{ key: 'delete', label: '删除', danger: true }]} />
         <span class="admin-panel-actions">
           {canImport ? (
             <a class="admin-mini" href={`/admin/books/${book.id}/import`}>

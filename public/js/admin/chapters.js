@@ -1,12 +1,14 @@
 // 后台章节表：翻页只替换表格；勾选后批量删除，删完留在当前页（服务端会夹到有效页）
 import { initBulk } from './bulk.js';
 
-const box = document.querySelector('#chapters-table');
+const panel = document.querySelector('#chapters-panel');
+const box = panel ? panel.querySelector('#chapters-table') : null;
 
-if (box) {
-  const bookId = box.dataset.bookId;
+if (panel && box) {
+  const bookId = panel.dataset.bookId;
   let currentPage = Math.max(1, Math.trunc(Number(new URLSearchParams(location.search).get('chapterPage'))) || 1);
-  const bulk = initBulk(box, { unit: '章' });
+  // 批量条在面板头里，勾选状态跟着整个面板走
+  const bulk = initBulk(panel, { unit: '章' });
 
   const load = async (page, push = true) => {
     const res = await fetch(`/admin/api/books/${bookId}/chapters?page=${page}`);
@@ -22,7 +24,7 @@ if (box) {
     }
   };
 
-  box.addEventListener('click', async (e) => {
+  panel.addEventListener('click', async (e) => {
     const pager = e.target.closest('.admin-pager a');
     if (pager) {
       e.preventDefault();

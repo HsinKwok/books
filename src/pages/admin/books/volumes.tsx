@@ -17,67 +17,67 @@ export function VolumePanel({
     <section class="admin-panel" id="volumes" data-book-id={String(book.id)}>
       <div class="admin-panel-head">
         <h2>卷 · {book.volumes.length}</h2>
+        {book.volumes.length ? (
+          <BulkBar unit="卷" actions={[{ key: 'delete', label: '删除选中', danger: true }]} />
+        ) : null}
       </div>
       <div class="admin-panel-body">
         {book.volumes.length ? (
-          <>
-            <BulkBar unit="卷" actions={[{ key: 'delete', label: '删除选中', danger: true }]} />
-            <ul class="admin-volume-list">
-              {book.volumes.map((volume, i) => (
-                <li class="admin-volume-item">
-                  <div class="admin-volume-head">
-                    <input
-                      class="admin-check-item"
-                      type="checkbox"
-                      value={String(volume.id)}
-                      data-bulk-item
-                      aria-label={`选择 ${volume.title || `第 ${volume.idx} 卷`}`}
-                    />
-                    <span class="admin-volume-name">{volume.title || `第 ${volume.idx} 卷`}</span>
-                    <span class="admin-cell-sub">{countOf(volume.id)} 章</span>
-                    <span class="admin-row-actions">
-                      {i > 0 ? (
-                        <form method="post" action={`/admin/books/${book.id}/volumes/${volume.id}/move`}>
-                          <input type="hidden" name="dir" value="up" />
-                          <button class="admin-mini" type="submit">
-                            ↑
-                          </button>
-                        </form>
-                      ) : null}
-                      {i < book.volumes.length - 1 ? (
-                        <form method="post" action={`/admin/books/${book.id}/volumes/${volume.id}/move`}>
-                          <input type="hidden" name="dir" value="down" />
-                          <button class="admin-mini" type="submit">
-                            ↓
-                          </button>
-                        </form>
-                      ) : null}
-                      <form
-                        method="post"
-                        action={`/admin/books/${book.id}/volumes/${volume.id}/delete`}
-                        data-confirm="删除这一卷？卷里的章节会归到其他卷或「未分卷」，章节本身不会删除。"
-                      >
-                        <button class="admin-mini admin-danger" type="submit">
-                          删除
+          <ul class="admin-volume-list">
+            {book.volumes.map((volume, i) => (
+              <li class="admin-volume-item">
+                <div class="admin-volume-head">
+                  <input
+                    class="admin-check-item"
+                    type="checkbox"
+                    value={String(volume.id)}
+                    data-bulk-item
+                    aria-label={`选择 ${volume.title || `第 ${volume.idx} 卷`}`}
+                  />
+                  <span class="admin-volume-name">{volume.title || `第 ${volume.idx} 卷`}</span>
+                  <span class="admin-cell-sub">{countOf(volume.id)} 章</span>
+                  <span class="admin-row-actions">
+                    {i > 0 ? (
+                      <form method="post" action={`/admin/books/${book.id}/volumes/${volume.id}/move`}>
+                        <input type="hidden" name="dir" value="up" />
+                        <button class="admin-mini" type="submit">
+                          ↑
                         </button>
                       </form>
-                    </span>
-                  </div>
-                  <form
-                    class="admin-volume-edit"
-                    method="post"
-                    action={`/admin/books/${book.id}/volumes/${volume.id}`}
-                  >
-                    <input name="title" value={volume.title} maxlength={100} placeholder="第一卷" />
-                    <input name="intro" value={volume.intro} maxlength={2000} placeholder="卷首语（可选）" />
-                    <button class="admin-mini" type="submit">
-                      保存
-                    </button>
-                  </form>
-                </li>
-              ))}
-            </ul>
-          </>
+                    ) : null}
+                    {i < book.volumes.length - 1 ? (
+                      <form method="post" action={`/admin/books/${book.id}/volumes/${volume.id}/move`}>
+                        <input type="hidden" name="dir" value="down" />
+                        <button class="admin-mini" type="submit">
+                          ↓
+                        </button>
+                      </form>
+                    ) : null}
+                    <form
+                      method="post"
+                      action={`/admin/books/${book.id}/volumes/${volume.id}/delete`}
+                      data-confirm="删除这一卷？卷里的章节会归到其他卷或「未分卷」，章节本身不会删除。"
+                    >
+                      <button class="admin-mini admin-danger" type="submit">
+                        删除
+                      </button>
+                    </form>
+                  </span>
+                </div>
+                <form
+                  class="admin-volume-edit"
+                  method="post"
+                  action={`/admin/books/${book.id}/volumes/${volume.id}`}
+                >
+                  <input name="title" value={volume.title} maxlength={100} placeholder="第一卷" />
+                  <input name="intro" value={volume.intro} maxlength={2000} placeholder="卷首语（可选）" />
+                  <button class="admin-mini" type="submit">
+                    保存
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
         ) : (
           <p class="admin-empty">还没有分卷。整本书保持「章」的平铺目录。</p>
         )}
