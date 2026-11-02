@@ -5,6 +5,7 @@ import {
   deleteChapter,
   deleteChapters,
   deleteVolume,
+  deleteVolumes,
   getBookMetaById,
   getChapter,
   logAudit,
@@ -250,6 +251,25 @@ app.post('/books/:id/volumes/:vid/delete', async (c) => {
 
   await deleteVolume(c.env.DB, book.id, Number(c.req.param('vid')));
   return c.redirect(`/admin/books/${book.id}?m=deleted`, 303);
+});
+
+/** 批量删除卷：前端勾选后调这里，卷里的章节退回其他卷，不删章节 */
+app.post('/api/books/:id/volumes/batch', async (c) => {
+  const guard = await readBatch(c, 'ids');
+  if (guard instanceof Response) return guard;
+  const { body, ids } = guard;
+
+  const user = adminUser(c);
+  const book = await getBookMetaById(c.env.DB, Number(c.req.param('id')));
+  if (!book) return c.notFound();
+  if (!canEditBook(user, book)) return c.text('403 · 无权编辑这本书', 403);
+
+  const action = String(body.action ?? '');
+  if (action !== 'delete') return c.json({ ok: false, error: 'bad-action' }, 400);
+
+  const count = await deleteVolumes(c.env.DB, book.id, ids);
+  await logAudit(c.env.DB, user.id, 'volume.batch.delete', `《${book.title}》批量删除 ${count} 卷`);
+  return c.json({ ok: true, count });
 });
 
 export default app;

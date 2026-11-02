@@ -98,12 +98,20 @@ export async function deleteChapters(db: D1Database, bookId: number, idxs: numbe
 
 export type ImportChapter = { title: string; body: string };
 export type ImportVolume = { title: string; intro?: string; chapters: ImportChapter[] };
+/** 导入目的卷：并入某一卷（没有 id 就新建），或 'none' 表示全部保持未分卷 */
+export type ImportTargetVolume = { id?: number; title: string } | 'none';
 
 export async function importChapters(
   db: D1Database,
   bookId: number,
   input: { volumes?: ImportVolume[]; chapters?: ImportChapter[] },
-  opts: { startIdx: number; status: BookStatus; replace?: boolean },
+  opts: {
+    startIdx: number;
+    status: BookStatus;
+    replace?: boolean;
+    /** 指定后忽略 TXT 里的卷标题，所有章节按顺序放进这一卷 */
+    target?: ImportTargetVolume;
+  },
 ) {
   if (opts.replace) {
     // 和单章删除保持一致：整本替换时旧章节的讨论和阅读进度也一起清掉
@@ -118,7 +126,35 @@ export async function importChapters(
   }
 
   const now = Math.floor(Date.now() / 1000);
-  const volumes = input.volumes ?? [];
+  const target = opts.target;
+  let targetId: number | null = null;
+
+  // 指定了目的卷：先把卷落地（替换模式下旧卷刚被清掉，需要重建），再让所有章节归入这一卷
+  if (target && target !== 'none') {
+    let id = target.id;
+    if (id) {
+      const exists = await db
+        .prepare('SELECT id FROM volumes WHERE book_id = ? AND id = ?')
+        .bind(bookId, id)
+        .first<{ id: number }>();
+      if (!exists) id = undefined;
+    }
+    if (!id) {
+      const idx = await nextVolumeIdx(db, bookId);
+      const row = await db
+        .prepare(
+          `INSERT INTO volumes (book_id, idx, title, intro, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
+           RETURNING id`,
+        )
+        .bind(bookId, idx, target.title, '', now, now)
+        .first<{ id: number }>();
+      id = row?.id;
+    }
+    targetId = id ?? null;
+  }
+
+  const volumes = target ? [] : input.volumes ?? [];
   const volumeIds: number[] = [];
 
   // 卷一次性批量写入；未归卷章节留到最后统一收编，只 touch 一次书
@@ -143,12 +179,20 @@ export async function importChapters(
   }
 
   const flat: { title: string; body: string; volumeId: number | null }[] = [];
-  volumes.forEach((volume, i) => {
-    for (const chapter of volume.chapters) {
-      flat.push({ ...chapter, volumeId: volumeIds[i] ?? null });
+  if (target) {
+    // 目的卷模式：TXT 里的卷标题不再建卷，章节顺序保持不变
+    for (const volume of input.volumes ?? []) {
+      for (const chapter of volume.chapters) flat.push({ ...chapter, volumeId: targetId });
     }
-  });
-  for (const chapter of input.chapters ?? []) flat.push({ ...chapter, volumeId: null });
+    for (const chapter of input.chapters ?? []) flat.push({ ...chapter, volumeId: targetId });
+  } else {
+    volumes.forEach((volume, i) => {
+      for (const chapter of volume.chapters) {
+        flat.push({ ...chapter, volumeId: volumeIds[i] ?? null });
+      }
+    });
+    for (const chapter of input.chapters ?? []) flat.push({ ...chapter, volumeId: null });
+  }
 
   const statements = flat.map((item, i) => {
     const body = normalizeBody(item.body);
@@ -184,7 +228,8 @@ export async function importChapters(
   for (const part of chunk(statements, 50)) {
     await db.batch(part);
   }
-  await assignOrphanChapters(db, bookId);
+  // 指定目的卷（含「不分卷」）时不收编，保留导入时的归卷结果
+  if (!target) await assignOrphanChapters(db, bookId);
   await touchBook(db, bookId);
   forget(db, 'stats', 'words');
   return flat.length;

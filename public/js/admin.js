@@ -10,6 +10,7 @@ if (has('#discuss-panel')) import('./admin/discussions.js');
 if (has('#users-filter')) import('./admin/users.js');
 if (has('#categories-table')) import('./admin/categories.js');
 if (has('#chapters-table')) import('./admin/chapters.js');
+if (has('#volumes[data-book-id]')) import('./admin/volumes.js');
 if (has('#chapter-body')) import('./admin/chapter.js');
 if (has('#import-file')) import('./admin/import.js');
 // 确认弹窗用事件委托，列表被局部替换后仍有效；没有危险操作表单的页面不加载

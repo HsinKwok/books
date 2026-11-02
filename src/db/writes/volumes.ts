@@ -1,5 +1,6 @@
 import { forget } from '../../cache';
 import { getVolumes } from '../books';
+import { chunk, placeholders } from '../sql';
 import { touchBook } from './books';
 
 /* ---------- 后台：卷 ---------- */
@@ -96,6 +97,43 @@ export async function deleteVolume(db: D1Database, bookId: number, id: number) {
   if (rest.length) await resequenceVolumes(db, bookId, rest.map((v) => v.id));
   await touchBook(db, bookId);
   forget(db, `volumes:${bookId}`);
+}
+
+/** 批量删除卷：章节退回剩下的第一卷（一卷不剩就置空），最后统一重排卷序 */
+export async function deleteVolumes(db: D1Database, bookId: number, ids: number[]) {
+  const list = await getVolumes(db, bookId);
+  const mode = new Set(ids);
+  const rest = list.filter((v) => !mode.has(v.id));
+  const removed = list.length - rest.length;
+  if (!removed) return 0;
+
+  // D1 单条语句最多 100 个参数：这里还有 book_id / 目标卷 id，按 98 切块
+  for (const part of chunk([...mode], 98)) {
+    const marks = placeholders(part.length);
+    if (rest.length) {
+      await db
+        .prepare(`UPDATE chapters SET volume_id = ? WHERE book_id = ? AND volume_id IN (${marks})`)
+        .bind(rest[0].id, bookId, ...part)
+        .run();
+    } else {
+      await db
+        .prepare(`UPDATE chapters SET volume_id = NULL WHERE book_id = ? AND volume_id IN (${marks})`)
+        .bind(bookId, ...part)
+        .run();
+    }
+  }
+  for (const part of chunk([...mode], 98)) {
+    const marks = placeholders(part.length);
+    await db
+      .prepare(`DELETE FROM volumes WHERE book_id = ? AND id IN (${marks})`)
+      .bind(bookId, ...part)
+      .run();
+  }
+
+  if (rest.length) await resequenceVolumes(db, bookId, rest.map((v) => v.id));
+  await touchBook(db, bookId);
+  forget(db, `volumes:${bookId}`);
+  return removed;
 }
 
 /** 上移 / 下移一位 */
