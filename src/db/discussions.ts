@@ -28,11 +28,16 @@ export async function getApprovedDiscussions(
     }>();
 
   let liked = new Set<number>();
-  if (userId) {
+  if (userId && results.length) {
     try {
+      // 只看本章的点赞：原来查全站点赞，用户点得越多这条越慢
       const rows = await db
-        .prepare('SELECT discussion_id FROM discussion_likes WHERE user_id = ?')
-        .bind(userId)
+        .prepare(
+          `SELECT l.discussion_id
+             FROM discussion_likes l JOIN discussions d ON d.id = l.discussion_id
+            WHERE l.user_id = ? AND d.book_id = ? AND d.chapter_idx = ? AND d.status = 'approved'`,
+        )
+        .bind(userId, bookId, chapterIdx)
         .all<{ discussion_id: number }>();
       liked = new Set(rows.results.map((r) => r.discussion_id));
     } catch {
@@ -59,27 +64,26 @@ export async function toggleDiscussionLike(db: D1Database, discussionId: number,
     .bind(discussionId, userId)
     .first<{ ok: number }>();
 
-  if (liked) {
-    await db
-      .prepare('DELETE FROM discussion_likes WHERE discussion_id = ? AND user_id = ?')
-      .bind(discussionId, userId)
-      .run();
-  } else {
-    await db
-      .prepare('INSERT OR IGNORE INTO discussion_likes (discussion_id, user_id, created_at) VALUES (?, ?, ?)')
-      .bind(discussionId, userId, Math.floor(Date.now() / 1000))
-      .run();
-  }
+  // 改点赞记录、回写计数、读回计数合成一个 batch：事务内按顺序执行，只剩两次往返
+  const [, , counted] = await db.batch([
+    liked
+      ? db
+          .prepare('DELETE FROM discussion_likes WHERE discussion_id = ? AND user_id = ?')
+          .bind(discussionId, userId)
+      : db
+          .prepare(
+            'INSERT OR IGNORE INTO discussion_likes (discussion_id, user_id, created_at) VALUES (?, ?, ?)',
+          )
+          .bind(discussionId, userId, Math.floor(Date.now() / 1000)),
+    db
+      .prepare(
+        'UPDATE discussions SET likes = (SELECT COUNT(*) FROM discussion_likes WHERE discussion_id = ?) WHERE id = ?',
+      )
+      .bind(discussionId, discussionId),
+    db.prepare('SELECT likes FROM discussions WHERE id = ?').bind(discussionId),
+  ]);
 
-  await db
-    .prepare('UPDATE discussions SET likes = (SELECT COUNT(*) FROM discussion_likes WHERE discussion_id = ?) WHERE id = ?')
-    .bind(discussionId, discussionId)
-    .run();
-
-  const row = await db
-    .prepare('SELECT likes FROM discussions WHERE id = ?')
-    .bind(discussionId)
-    .first<{ likes: number }>();
+  const row = (counted.results as { likes: number }[])[0];
   return { liked: !liked, likes: row?.likes ?? 0 };
 }
 
@@ -230,6 +234,16 @@ export async function countDiscussions(db: D1Database, status: 'pending' | 'appr
     .bind(status)
     .first<{ n: number }>();
   return row?.n ?? 0;
+}
+
+/** 后台三个栏目的条数：一条 GROUP BY 取代三次计数 */
+export async function countDiscussionsByStatus(db: D1Database) {
+  const { results } = await db
+    .prepare('SELECT status, COUNT(*) AS n FROM discussions GROUP BY status')
+    .all<{ status: 'pending' | 'approved' | 'spam'; n: number }>();
+  const counts = { pending: 0, approved: 0, spam: 0 };
+  for (const row of results) counts[row.status] = row.n;
+  return counts;
 }
 
 export async function setDiscussionStatus(

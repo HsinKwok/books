@@ -4,9 +4,11 @@ import { initBulk } from './bulk.js';
 const panel = document.querySelector('#chapters-panel');
 const box = panel ? panel.querySelector('#chapters-table') : null;
 
+const pageFromUrl = () => Math.max(1, Math.trunc(Number(new URLSearchParams(location.search).get('chapterPage'))) || 1);
+
 if (panel && box) {
   const bookId = panel.dataset.bookId;
-  let currentPage = Math.max(1, Math.trunc(Number(new URLSearchParams(location.search).get('chapterPage'))) || 1);
+  let currentPage = pageFromUrl();
   // 批量条在面板头里，勾选状态跟着整个面板走
   const bulk = initBulk(panel, { unit: '章' });
 
@@ -23,6 +25,13 @@ if (panel && box) {
       if (href !== `${location.pathname}${location.search}`) history.pushState({}, '', href);
     }
   };
+
+  // 卷面板增删卷后广播新的表格，原地换掉
+  window.addEventListener('admin:chapters', (e) => {
+    box.innerHTML = e.detail.html;
+    currentPage = e.detail.page || currentPage;
+    bulk.sync();
+  });
 
   panel.addEventListener('click', async (e) => {
     const pager = e.target.closest('.admin-pager a');
@@ -58,8 +67,7 @@ if (panel && box) {
 
   // 浏览器前进/后退时按地址栏还原页码
   window.addEventListener('popstate', () => {
-    const page = Math.max(1, Math.trunc(Number(new URLSearchParams(location.search).get('chapterPage'))) || 1);
-    load(page, false).catch(() => location.reload());
+    load(pageFromUrl(), false).catch(() => location.reload());
   });
 
   bulk.sync();

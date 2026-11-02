@@ -98,15 +98,21 @@ async function runSearch(
 
   const { results } = await db
     .prepare(
-      `SELECT b.slug, b.title AS book_title, c.idx, c.title, c.body
+      // 只把命中位置附近的一小段正文带回 Worker，不再整篇 body 进内存
+      `SELECT b.slug, b.title AS book_title, c.idx, c.title,
+              substr(c.body,
+                     CASE WHEN instr(lower(c.body), lower(?)) > 0
+                          THEN max(1, instr(lower(c.body), lower(?)) - 30)
+                          ELSE 1 END,
+                     140) AS excerpt
          FROM chapters c JOIN books b ON b.id = c.book_id
         WHERE b.status = 'published' AND c.status = 'published'
           AND ${match}
         ORDER BY c.updated_at DESC
         LIMIT ? OFFSET ?`,
     )
-    .bind(...binds, limit, offset)
-    .all<{ slug: string; book_title: string; idx: number; title: string; body: string }>();
+    .bind(query, query, ...binds, limit, offset)
+    .all<{ slug: string; book_title: string; idx: number; title: string; excerpt: string }>();
 
   return {
     mode: 'like',
@@ -115,7 +121,7 @@ async function runSearch(
       bookTitle: r.book_title,
       idx: r.idx,
       title: r.title,
-      snippet: likeSnippet(r.body, query),
+      snippet: likeSnippet(r.excerpt, query),
     })),
   };
 }

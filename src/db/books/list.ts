@@ -1,12 +1,12 @@
 import {
   BOOK_COLS,
-  CHAPTER_COLS_LITE,
   type Book,
   type BookRow,
+  type ChapterAgg,
   type Volume,
   isoDate,
 } from '../types';
-import { type ChapterLiteRow, toBook, withVolumeNos } from '../rows';
+import { toBook } from '../rows';
 import { clampPage } from '../paging';
 import { placeholders } from '../sql';
 import { type BookFilter, bookFilter } from './filter';
@@ -22,50 +22,54 @@ const BOOK_ORDERS = {
 
 export type BookOrder = keyof typeof BOOK_ORDERS;
 
-export async function listBooks(
-  db: D1Database,
-  opts: BookFilter & {
-    /** 只要 N 本；分页时配合 offset 使用 */
-    limit?: number;
-    offset?: number;
-    order?: BookOrder;
-  } = {},
-): Promise<Book[]> {
+type ListOpts = BookFilter & {
+  /** 只要 N 本；分页时配合 offset 使用 */
+  limit?: number;
+  offset?: number;
+  order?: BookOrder;
+};
+
+/** 列表页三条语句的公共部分：书籍行、章节聚合、卷，参数完全一致 */
+function listParts(db: D1Database, opts: ListOpts) {
   const { where, binds } = bookFilter(opts);
   const order = BOOK_ORDERS[opts.order ?? (opts.limit ? 'recent' : 'sort')];
   // 分页窗口同时带进章节/卷的子查询，避免把没选中书籍的章节也读出来
   const page = opts.limit ? ' LIMIT ? OFFSET ?' : '';
   const pageBinds = opts.limit ? [opts.limit, opts.offset ?? 0] : [];
   const scope = `book_id IN (SELECT id FROM books ${where} ORDER BY ${order}${page})`;
-  const chapterWhere = opts.includeDrafts ? scope : `${scope} AND status = 'published'`;
+  // 章节只聚合，不再整行读回：24 本书的目录可能有几万行，这里只回 24 行
+  const published = opts.includeDrafts ? '' : " AND c.status = 'published'";
+  const firstPublished = opts.includeDrafts ? '' : " AND c2.status = 'published'";
 
-  // 三条查询同参数、同往返，合成一个 batch 只走一次网络
-  const [bookRes, chapterRes, volumeRes] = await db.batch([
-    db
+  return {
+    books: db
       .prepare(`SELECT ${BOOK_COLS} FROM books ${where} ORDER BY ${order}${page}`)
       .bind(...binds, ...pageBinds),
-    db
+    aggs: db
       .prepare(
-        `SELECT ${CHAPTER_COLS_LITE} FROM chapters WHERE ${chapterWhere} ORDER BY book_id, idx`,
+        `SELECT c.book_id, COUNT(*) AS n, COALESCE(SUM(c.words), 0) AS words,
+                (SELECT c2.title FROM chapters c2
+                  WHERE c2.book_id = c.book_id${firstPublished}
+                  ORDER BY c2.idx LIMIT 1) AS first_title
+           FROM chapters c
+          WHERE ${scope}${published}
+          GROUP BY c.book_id`,
       )
       .bind(...binds, ...pageBinds),
-    db
+    volumes: db
       .prepare(
         `SELECT id, book_id, idx, title, intro FROM volumes WHERE ${scope} ORDER BY book_id, idx`,
       )
       .bind(...binds, ...pageBinds),
-  ]);
+  };
+}
 
-  const bookRows = bookRes.results as BookRow[];
-  const chapterRows = chapterRes.results as ChapterLiteRow[];
-  const volumeRows = volumeRes.results as (Volume & { book_id: number })[];
-
-  const grouped = new Map<number, ChapterLiteRow[]>();
-  for (const row of chapterRows) {
-    const list = grouped.get(row.book_id) ?? [];
-    list.push(row);
-    grouped.set(row.book_id, list);
-  }
+function assembleBooks(
+  bookRows: BookRow[],
+  aggRows: ChapterAgg[],
+  volumeRows: (Volume & { book_id: number })[],
+): Book[] {
+  const aggs = new Map(aggRows.map((row) => [row.book_id, row]));
 
   const volumesByBook = new Map<number, Volume[]>();
   for (const row of volumeRows) {
@@ -74,8 +78,24 @@ export async function listBooks(
     volumesByBook.set(row.book_id, list);
   }
 
-  return bookRows.map((row) =>
-    toBook(row, withVolumeNos(grouped.get(row.id) ?? []), volumesByBook.get(row.id) ?? []),
+  return bookRows.map((row) => {
+    const agg = aggs.get(row.id);
+    return toBook(row, [], volumesByBook.get(row.id) ?? [], {
+      chapterCount: agg?.n ?? 0,
+      words: agg?.words ?? 0,
+      firstChapterTitle: agg?.first_title ?? '',
+    });
+  });
+}
+
+export async function listBooks(db: D1Database, opts: ListOpts = {}): Promise<Book[]> {
+  const parts = listParts(db, opts);
+  // 三条查询同参数、同往返，合成一个 batch 只走一次网络
+  const [bookRes, aggRes, volumeRes] = await db.batch([parts.books, parts.aggs, parts.volumes]);
+  return assembleBooks(
+    bookRes.results as BookRow[],
+    aggRes.results as ChapterAgg[],
+    volumeRes.results as (Volume & { book_id: number })[],
   );
 }
 
@@ -87,28 +107,38 @@ export type BookPage = {
   pages: number;
 };
 
-/** 前台列表分页：首页 / 分类页共用，只取当前页的书和章节 */
+/** 前台列表分页：首页 / 分类页共用，只取当前页的书 */
 export async function listBooksPage(
   db: D1Database,
   opts: BookFilter & { page?: number; perPage?: number; order?: BookOrder } = {},
 ): Promise<BookPage> {
   const perPage = Math.min(60, Math.max(1, Math.trunc(opts.perPage ?? 24)));
   const { where, binds } = bookFilter(opts);
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM books ${where}`)
-    .bind(...binds)
-    .first<{ n: number }>();
+  // 先按请求的页码取数，计数和列表同一个 batch；页码越界时再补一次
+  const asked = Math.max(1, Math.trunc(Number(opts.page)) || 1);
+  const offset = (asked - 1) * perPage;
+  const order = opts.order ?? 'sort';
+  const parts = listParts(db, { ...opts, order, limit: perPage, offset });
 
-  const total = row?.n ?? 0;
-  const paging = clampPage(opts.page, total, perPage);
-  const books = total
-    ? await listBooks(db, {
-        ...opts,
-        order: opts.order ?? 'sort',
-        limit: paging.perPage,
-        offset: paging.offset,
-      })
-    : [];
+  const [countRes, bookRes, aggRes, volumeRes] = await db.batch([
+    db.prepare(`SELECT COUNT(*) AS n FROM books ${where}`).bind(...binds),
+    parts.books,
+    parts.aggs,
+    parts.volumes,
+  ]);
+
+  const total = (countRes.results as { n: number }[])[0]?.n ?? 0;
+  const paging = clampPage(asked, total, perPage);
+  if (!total) return { books: [], total, page: paging.page, pages: paging.pages };
+
+  const books =
+    paging.offset === offset
+      ? assembleBooks(
+          bookRes.results as BookRow[],
+          aggRes.results as ChapterAgg[],
+          volumeRes.results as (Volume & { book_id: number })[],
+        )
+      : await listBooks(db, { ...opts, order, limit: perPage, offset: paging.offset });
 
   return { books, total, page: paging.page, pages: paging.pages };
 }

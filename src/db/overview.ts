@@ -1,5 +1,3 @@
-import { countDiscussions } from './discussions';
-
 /* ---------- 后台概览 ---------- */
 
 export type AdminOverview = {
@@ -14,35 +12,41 @@ export type AdminOverview = {
 };
 
 export async function getAdminOverview(db: D1Database): Promise<AdminOverview> {
-  const [books, chapters, users, pending] = await Promise.all([
-    db
-      .prepare(
-        `SELECT COUNT(*) AS total,
-                SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published,
-                SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft
-           FROM books`,
-      )
-      .first<{ total: number; published: number | null; draft: number | null }>(),
-    db
-      .prepare(
-        `SELECT COUNT(*) AS total, COALESCE(SUM(words), 0) AS words,
-                SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft
-           FROM chapters`,
-      )
-      .first<{ total: number; words: number; draft: number | null }>(),
-    db.prepare('SELECT COUNT(*) AS n FROM users').first<{ n: number }>(),
-    countDiscussions(db, 'pending'),
+  // 四条互不依赖的统计并成一个 batch：一次往返取回
+  const [books, chapters, users, pending] = await db.batch([
+    db.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN status = 'published' THEN 1 ELSE 0 END) AS published,
+              SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft
+         FROM books`,
+    ),
+    db.prepare(
+      `SELECT COUNT(*) AS total, COALESCE(SUM(words), 0) AS words,
+              SUM(CASE WHEN status = 'draft' THEN 1 ELSE 0 END) AS draft
+         FROM chapters`,
+    ),
+    db.prepare('SELECT COUNT(*) AS n FROM users'),
+    db.prepare(`SELECT COUNT(*) AS n FROM discussions WHERE status = 'pending'`),
   ]);
 
+  const bookRow = books.results?.[0] as
+    | { total: number; published: number | null; draft: number | null }
+    | undefined;
+  const chapterRow = chapters.results?.[0] as
+    | { total: number; words: number; draft: number | null }
+    | undefined;
+  const userRow = users.results?.[0] as { n: number } | undefined;
+  const pendingRow = pending.results?.[0] as { n: number } | undefined;
+
   return {
-    books: books?.total ?? 0,
-    publishedBooks: books?.published ?? 0,
-    draftBooks: books?.draft ?? 0,
-    chapters: chapters?.total ?? 0,
-    draftChapters: chapters?.draft ?? 0,
-    words: chapters?.words ?? 0,
-    users: users?.n ?? 0,
-    pending,
+    books: bookRow?.total ?? 0,
+    publishedBooks: bookRow?.published ?? 0,
+    draftBooks: bookRow?.draft ?? 0,
+    chapters: chapterRow?.total ?? 0,
+    draftChapters: chapterRow?.draft ?? 0,
+    words: chapterRow?.words ?? 0,
+    users: userRow?.n ?? 0,
+    pending: pendingRow?.n ?? 0,
   };
 }
 

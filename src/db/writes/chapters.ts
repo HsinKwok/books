@@ -2,8 +2,8 @@ import { markdownText, renderMarkdown } from '../../markdown';
 import { contentKey, forget } from '../../cache';
 import { chunk, placeholders } from '../sql';
 import { countWords, normalizeBody, type BookStatus } from '../types';
-import { touchBook } from './books';
-import { assignOrphanChapters, nextVolumeIdx } from './volumes';
+import { touchBookStatement } from './books';
+import { nextVolumeIdx, orphanStatement } from './volumes';
 
 /* ---------- 后台：章节写入 ---------- */
 
@@ -13,6 +13,18 @@ export async function nextChapterIdx(db: D1Database, bookId: number) {
     .bind(bookId)
     .first<{ max: number }>();
   return (row?.max ?? 0) + 1;
+}
+
+/** 标题 / 正文的入库预处理：编辑和插入共用 */
+function prepareChapter(title: string, body: string) {
+  const clean = normalizeBody(body);
+  return {
+    title,
+    clean,
+    html: renderMarkdown(clean),
+    hash: contentKey(clean),
+    words: countWords(markdownText(clean)),
+  };
 }
 
 export async function saveChapter(
@@ -25,43 +37,107 @@ export async function saveChapter(
   volumeId: number | null = null,
 ) {
   const now = Math.floor(Date.now() / 1000);
-  const clean = normalizeBody(body);
   // 正文 HTML 与摘要一起入库，读章节时摘要对得上就不用再解析 Markdown
-  await db
+  const chapter = prepareChapter(title, body);
+  // 章节落库、收编未分卷章节、刷新书籍时间合成一个 batch：一次往返、一个事务
+  const statements: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `INSERT INTO chapters (book_id, idx, volume_id, title, body, body_html, body_hash, words, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (book_id, idx) DO UPDATE SET
+           volume_id = excluded.volume_id,
+           title = excluded.title,
+           body = excluded.body,
+           body_html = excluded.body_html,
+           body_hash = excluded.body_hash,
+           words = excluded.words,
+           status = excluded.status,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(
+        bookId,
+        idx,
+        volumeId,
+        chapter.title,
+        chapter.clean,
+        chapter.html,
+        chapter.hash,
+        chapter.words,
+        status,
+        now,
+        now,
+      ),
+  ];
+  if (volumeId === null) statements.push(orphanStatement(db, bookId));
+  statements.push(touchBookStatement(db, bookId, now));
+  await db.batch(statements);
+  forget(db, 'stats', 'words');
+}
+
+/** 新增章节：序号上已有章节时，把该章及之后的章节整体后移一位，评论和阅读进度同步跟着走 */
+export async function insertChapter(
+  db: D1Database,
+  bookId: number,
+  idx: number,
+  title: string,
+  body: string,
+  status: BookStatus,
+  volumeId: number | null = null,
+) {
+  const now = Math.floor(Date.now() / 1000);
+  const chapter = prepareChapter(title, body);
+  const insert = db
     .prepare(
       `INSERT INTO chapters (book_id, idx, volume_id, title, body, body_html, body_hash, words, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (book_id, idx) DO UPDATE SET
-         volume_id = excluded.volume_id,
-         title = excluded.title,
-         body = excluded.body,
-         body_html = excluded.body_html,
-         body_hash = excluded.body_hash,
-         words = excluded.words,
-         status = excluded.status,
-         updated_at = excluded.updated_at`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(
-      bookId,
-      idx,
-      volumeId,
-      title,
-      clean,
-      renderMarkdown(clean),
-      contentKey(clean),
-      countWords(markdownText(clean)),
-      status,
-      now,
-      now,
+    .bind(bookId, idx, volumeId, chapter.title, chapter.clean, chapter.html, chapter.hash, chapter.words, status, now, now);
+  // 书籍的 updated_at、未分卷章节的收编都并进同一个 batch，省两次往返
+  const touch = touchBookStatement(db, bookId, now);
+  const orphan = volumeId === null ? orphanStatement(db, bookId) : null;
+
+  // 最大值和占用判断合成一条，省一次 D1 往返；两者都是索引点查
+  const row = await db
+    .prepare(
+      `SELECT (SELECT COALESCE(MAX(idx), 0) FROM chapters WHERE book_id = ?) AS max,
+              EXISTS (SELECT 1 FROM chapters WHERE book_id = ? AND idx = ?) AS occupied`,
     )
-    .run();
-  if (volumeId === null) await assignOrphanChapters(db, bookId);
-  await touchBook(db, bookId);
-  forget(db, 'stats', 'words');
+    .bind(bookId, bookId, idx)
+    .first<{ max: number; occupied: number }>();
+  const max = row?.max ?? 0;
+
+  if (!row?.occupied) {
+    await db.batch(orphan ? [insert, touch, orphan] : [insert, touch]);
+  } else {
+    // 先把后移部分抬到 MAX 之外，避免 UNIQUE (book_id, idx) 在中途撞车
+    const offset = max + 1;
+    const statements: D1PreparedStatement[] = [
+      db.prepare('UPDATE chapters SET idx = idx + ? WHERE book_id = ? AND idx >= ?').bind(offset, bookId, idx),
+      db
+        .prepare('UPDATE chapters SET idx = idx - ? + 1 WHERE book_id = ? AND idx >= ?')
+        .bind(offset, bookId, idx + offset),
+      db
+        .prepare('UPDATE discussions SET chapter_idx = chapter_idx + 1 WHERE book_id = ? AND chapter_idx >= ?')
+        .bind(bookId, idx),
+      db
+        .prepare(
+          'UPDATE reading_progress SET chapter_idx = chapter_idx + 1 WHERE book_slug = (SELECT slug FROM books WHERE id = ?) AND chapter_idx >= ?',
+        )
+        .bind(bookId, idx),
+      insert,
+      touch,
+    ];
+    if (orphan) statements.push(orphan);
+    await db.batch(statements);
+  }
+
+  forget(db, 'stats', 'words', 'talk-counts');
 }
 
 /** 删章不重排 idx，但要把挂在这一章上的讨论和阅读进度一起清掉，避免旧数据挂到新章上 */
 export async function deleteChapter(db: D1Database, bookId: number, idx: number) {
+  const now = Math.floor(Date.now() / 1000);
   await db.batch([
     db.prepare('DELETE FROM discussions WHERE book_id = ? AND chapter_idx = ?').bind(bookId, idx),
     db
@@ -70,8 +146,8 @@ export async function deleteChapter(db: D1Database, bookId: number, idx: number)
       )
       .bind(idx, bookId),
     db.prepare('DELETE FROM chapters WHERE book_id = ? AND idx = ?').bind(bookId, idx),
+    touchBookStatement(db, bookId, now),
   ]);
-  await touchBook(db, bookId);
   forget(db, 'stats', 'words', 'talk-counts');
 }
 
@@ -91,8 +167,8 @@ export async function deleteChapters(db: D1Database, bookId: number, idxs: numbe
       db.prepare(`DELETE FROM chapters WHERE book_id = ? AND idx IN (${marks})`).bind(bookId, ...part),
     );
   }
+  stmts.push(touchBookStatement(db, bookId, Math.floor(Date.now() / 1000)));
   await db.batch(stmts);
-  await touchBook(db, bookId);
   forget(db, 'stats', 'words', 'talk-counts');
 }
 
@@ -225,12 +301,15 @@ export async function importChapters(
       );
   });
 
-  for (const part of chunk(statements, 50)) {
+  // 每批 200 条：比 50 条少四分之三的往返，仍在 D1 的稳定区间内
+  for (const part of chunk(statements, 200)) {
     await db.batch(part);
   }
-  // 指定目的卷（含「不分卷」）时不收编，保留导入时的归卷结果
-  if (!target) await assignOrphanChapters(db, bookId);
-  await touchBook(db, bookId);
+  // 指定目的卷（含「不分卷」）时不收编，保留导入时的归卷结果；收编与 touch 合成一次
+  const tail: D1PreparedStatement[] = [];
+  if (!target) tail.push(orphanStatement(db, bookId));
+  tail.push(touchBookStatement(db, bookId, now));
+  await db.batch(tail);
   forget(db, 'stats', 'words');
   return flat.length;
 }

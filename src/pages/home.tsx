@@ -97,10 +97,10 @@ export function Home({
                       {lead.title}
                     </span>
                     <span class="resume-chapter" id="resume-chapter">
-                      {lead.chapters[0]?.title}
+                      {lead.firstChapterTitle}
                     </span>
                     <span class="resume-note">
-                      {lead.chapters.length} 章 · {lead.category}
+                      {lead.chapterCount} 章 · {lead.category}
                     </span>
                     <span class="resume-go">接着读 →</span>
                   </a>

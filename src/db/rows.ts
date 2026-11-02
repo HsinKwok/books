@@ -10,7 +10,7 @@ import {
 
 export type ChapterLiteRow = Omit<ChapterRow, 'body'>;
 
-function toChapterLite(row: ChapterLiteRow, volumeNo = 0): Chapter {
+export function toChapterLite(row: ChapterLiteRow, volumeNo = 0): Chapter {
   return {
     id: row.id,
     idx: row.idx,
@@ -42,7 +42,12 @@ export function withVolumeNos(rows: ChapterLiteRow[]): Chapter[] {
   });
 }
 
-export function toBook(row: BookRow, chapters: Chapter[], volumes: Volume[] = []): Book {
+export function toBook(
+  row: BookRow,
+  chapters: Chapter[],
+  volumes: Volume[] = [],
+  agg?: { chapterCount: number; words: number; firstChapterTitle: string },
+): Book {
   return {
     id: row.id,
     slug: row.slug,
@@ -59,6 +64,10 @@ export function toBook(row: BookRow, chapters: Chapter[], volumes: Volume[] = []
     ownerId: row.owner_id ?? null,
     createdAt: row.created_at,
     updatedAt: isoDate(row.updated_at),
+    // 列表页传聚合值；详情页 chapters 是全量，直接就地算
+    chapterCount: agg?.chapterCount ?? chapters.length,
+    words: agg?.words ?? chapters.reduce((n, c) => n + c.words, 0),
+    firstChapterTitle: agg?.firstChapterTitle ?? chapters[0]?.title ?? '',
     chapters,
     volumes,
   };

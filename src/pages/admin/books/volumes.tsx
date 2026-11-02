@@ -1,20 +1,42 @@
-import type { Book } from '../../../db';
+import type { Book, Volume } from '../../../db';
 import { BulkBar } from '../layout';
 
-/** 卷管理：排序、改名、删除，以及新增一卷；勾选后可批量删除 */
-export function VolumePanel({
-  book,
-  counts,
-}: {
+const titleOf = (volume: Volume) => volume.title || `第 ${volume.idx} 卷`;
+
+/** 上移 / 下移只有方向不同，共用一个表单 */
+function MoveButton({ bookId, volumeId, dir }: { bookId: number; volumeId: number; dir: 'up' | 'down' }) {
+  return (
+    <form method="post" action={`/admin/books/${bookId}/volumes/${volumeId}/move`}>
+      <input type="hidden" name="dir" value={dir} />
+      <button class="admin-mini" type="submit">
+        {dir === 'up' ? '↑' : '↓'}
+      </button>
+    </form>
+  );
+}
+
+type VolumePanelProps = {
   book: Book;
   /** 每卷章数（键为 `v${id}`）；章节表分页后由后端统计传入 */
   counts?: Record<string, number>;
-}) {
+};
+
+/** 卷管理：排序、改名、删除，以及新增一卷；勾选后可批量删除 */
+export function VolumePanel(props: VolumePanelProps) {
+  return (
+    <section class="admin-panel" id="volumes" data-book-id={String(props.book.id)}>
+      <VolumePanelBody {...props} />
+    </section>
+  );
+}
+
+/** 面板内容：卷增删改后 ajax 只换这一块，section 本身和批量逻辑保留 */
+export function VolumePanelBody({ book, counts }: VolumePanelProps) {
   const countOf = (volumeId: number) =>
     counts?.[`v${volumeId}`] ?? book.chapters.filter((chapter) => chapter.volumeId === volumeId).length;
 
   return (
-    <section class="admin-panel" id="volumes" data-book-id={String(book.id)}>
+    <>
       <div class="admin-panel-head">
         <h2>卷 · {book.volumes.length}</h2>
         {book.volumes.length ? (
@@ -32,27 +54,13 @@ export function VolumePanel({
                     type="checkbox"
                     value={String(volume.id)}
                     data-bulk-item
-                    aria-label={`选择 ${volume.title || `第 ${volume.idx} 卷`}`}
+                    aria-label={`选择 ${titleOf(volume)}`}
                   />
-                  <span class="admin-volume-name">{volume.title || `第 ${volume.idx} 卷`}</span>
+                  <span class="admin-volume-name">{titleOf(volume)}</span>
                   <span class="admin-cell-sub">{countOf(volume.id)} 章</span>
                   <span class="admin-row-actions">
-                    {i > 0 ? (
-                      <form method="post" action={`/admin/books/${book.id}/volumes/${volume.id}/move`}>
-                        <input type="hidden" name="dir" value="up" />
-                        <button class="admin-mini" type="submit">
-                          ↑
-                        </button>
-                      </form>
-                    ) : null}
-                    {i < book.volumes.length - 1 ? (
-                      <form method="post" action={`/admin/books/${book.id}/volumes/${volume.id}/move`}>
-                        <input type="hidden" name="dir" value="down" />
-                        <button class="admin-mini" type="submit">
-                          ↓
-                        </button>
-                      </form>
-                    ) : null}
+                    {i > 0 ? <MoveButton bookId={book.id} volumeId={volume.id} dir="up" /> : null}
+                    {i < book.volumes.length - 1 ? <MoveButton bookId={book.id} volumeId={volume.id} dir="down" /> : null}
                     <form
                       method="post"
                       action={`/admin/books/${book.id}/volumes/${volume.id}/delete`}
@@ -90,6 +98,6 @@ export function VolumePanel({
           </button>
         </form>
       </div>
-    </section>
+    </>
   );
 }

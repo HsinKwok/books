@@ -3,7 +3,8 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { AppContext, Env, SessionUser, Variables } from './env';
 import { createSession, deleteSession, findSessionUser } from './db';
 
-const COOKIE = 'read_session';
+/** 会话 Cookie 名：边缘缓存也用它判断请求是否带登录态 */
+export const SESSION_COOKIE = 'read_session';
 const MAX_AGE = 30 * 86400; // 30 天
 const ITERATIONS = 100_000;
 
@@ -69,7 +70,7 @@ export async function startSession(
   const token = randomToken();
   const expiresAt = Math.floor(Date.now() / 1000) + MAX_AGE;
   await createSession(c.env.DB, token, userId, expiresAt);
-  setCookie(c, COOKIE, token, {
+  setCookie(c, SESSION_COOKIE, token, {
     path: '/',
     httpOnly: true,
     sameSite: 'Lax',
@@ -79,13 +80,13 @@ export async function startSession(
 }
 
 export async function endSession(c: Context<{ Bindings: Env; Variables: Variables }>) {
-  const token = getCookie(c, COOKIE);
+  const token = getCookie(c, SESSION_COOKIE);
   if (token) await deleteSession(c.env.DB, token);
-  deleteCookie(c, COOKIE, { path: '/' });
+  deleteCookie(c, SESSION_COOKIE, { path: '/' });
 }
 
 export async function loadUser(c: Context<{ Bindings: Env; Variables: Variables }>): Promise<SessionUser | null> {
-  const token = getCookie(c, COOKIE);
+  const token = getCookie(c, SESSION_COOKIE);
   if (!token) return null;
   return findSessionUser(c.env.DB, token);
 }

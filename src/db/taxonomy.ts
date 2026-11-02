@@ -94,22 +94,28 @@ export async function updateCategory(
   id: number,
   input: { name: string; slug: string; sort: number; hidden: boolean; description: string },
 ) {
-  await db
-    .prepare(
-      `UPDATE categories
-          SET name = ?, slug = ?, sort = ?, hidden = ?, description = ?, updated_at = ?
-        WHERE id = ?`,
-    )
-    .bind(
-      input.name,
-      input.slug,
-      input.sort,
-      input.hidden ? 1 : 0,
-      input.description,
-      Math.floor(Date.now() / 1000),
-      id,
-    )
-    .run();
+  const now = Math.floor(Date.now() / 1000);
+  const old = await db
+    .prepare('SELECT name FROM categories WHERE id = ?')
+    .bind(id)
+    .first<{ name: string }>();
+
+  const stmts: D1PreparedStatement[] = [
+    db
+      .prepare(
+        `UPDATE categories
+            SET name = ?, slug = ?, sort = ?, hidden = ?, description = ?, updated_at = ?
+          WHERE id = ?`,
+      )
+      .bind(input.name, input.slug, input.sort, input.hidden ? 1 : 0, input.description, now, id),
+  ];
+  // 改名时把原分类下的书一起迁到新名字，避免书停留在旧分类名上
+  if (old && old.name !== input.name) {
+    stmts.push(
+      db.prepare('UPDATE books SET category = ? WHERE category = ?').bind(input.name, old.name),
+    );
+  }
+  await db.batch(stmts);
   forget(db, 'categories');
 }
 
@@ -175,7 +181,7 @@ export async function deleteCategories(db: D1Database, ids: number[]) {
   return keep.length;
 }
 
-/** 后台分类下拉用：分类表 + 书里实际出现的旧分类（改名不同步 books.category） */
+/** 后台分类下拉用：分类表 + 历史数据里残留在书上的旧分类名 */
 export async function categoryNames(db: D1Database): Promise<string[]> {
   const [categories, counts] = await Promise.all([listCategories(db), categoryBookCounts(db)]);
   const names = categories.map((cat) => cat.name);

@@ -26,7 +26,7 @@ export function BookFeed({
               <span class="feed-meta">
                 <span class="feed-date">{shortDate(book.updatedAt)}</span>
                 <span> · {book.category}</span>
-                <span> · {book.chapters.length} 章</span>
+                <span> · {book.chapterCount} 章</span>
                 {count ? <span> · {count} 条讨论</span> : null}
               </span>
               <span class="feed-title">{book.title}</span>
@@ -60,7 +60,7 @@ export function BookCards({
             <Cover book={book} no={startNo + i + 1} card />
             <span class="book-card-title">{book.title}</span>
             <span class="book-card-meta">
-              {book.category} · {book.chapters.length} 章
+              {book.category} · {book.chapterCount} 章
               {count ? ` · ${count} 条讨论` : ''}
             </span>
           </a>
@@ -144,7 +144,7 @@ export function CategoryPage({
   pages: number;
   base: string;
 }) {
-  const chapters = books.reduce((n, book) => n + book.chapters.length, 0);
+  const chapters = books.reduce((n, book) => n + book.chapterCount, 0);
 
   return (
     <div class="page">
@@ -184,7 +184,7 @@ export function AuthorPage({
   pages: number;
   base: string;
 }) {
-  const chapters = books.reduce((n, book) => n + book.chapters.length, 0);
+  const chapters = books.reduce((n, book) => n + book.chapterCount, 0);
   const words = books.reduce((n, book) => n + bookWords(book), 0);
 
   return (

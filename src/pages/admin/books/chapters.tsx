@@ -2,7 +2,7 @@ import type { Book, Chapter } from '../../../db';
 import { isoDate } from '../../../db';
 import { Badge, BulkBar } from '../layout';
 
-/** 章节表本体：批量条 + 表格 + 翻页，AJAX 只替换这一块 */
+/** 章节表本体：表格 + 翻页，AJAX 只替换这一块 */
 export function ChapterTable({
   book,
   chapters,
@@ -15,11 +15,8 @@ export function ChapterTable({
   pages: number;
 }) {
   const href = (n: number) => `/admin/books/${book.id}?chapterPage=${n}`;
-  const volumeName = (id: number | null) => {
-    if (id === null) return '';
-    const volume = book.volumes.find((v) => v.id === id);
-    return volume ? volume.title || `第 ${volume.idx} 卷` : '';
-  };
+  // 一次建好卷名映射，避免每行都 find 一遍
+  const volumeNames = new Map(book.volumes.map((v) => [v.id, v.title || `第 ${v.idx} 卷`]));
 
   return (
     <>
@@ -57,7 +54,7 @@ export function ChapterTable({
               {book.volumes.length ? (
                 <td class="admin-cell-sub">
                   {chapter.volumeId
-                    ? `${volumeName(chapter.volumeId)} · 第 ${chapter.volumeNo} 章`
+                    ? `${volumeNames.get(chapter.volumeId) ?? ''} · 第 ${chapter.volumeNo} 章`
                     : '未分卷'}
                 </td>
               ) : null}
@@ -110,7 +107,7 @@ export function ChapterTable({
   );
 }
 
-/** 章节面板：标题栏 + 可局部刷新的表格容器 */
+/** 章节面板：标题栏（含批量条）+ 可局部刷新的表格容器 */
 export function ChapterPanel({
   book,
   chapters,
@@ -143,7 +140,7 @@ export function ChapterPanel({
         </span>
       </div>
 
-      <div id="chapters-table" data-book-id={String(book.id)}>
+      <div id="chapters-table">
         <ChapterTable book={book} chapters={chapters} page={page} pages={pages} />
       </div>
     </section>

@@ -166,7 +166,7 @@ export function BookFormPage({
   canImport,
   chapterPage = 1,
   chapterPages = 1,
-  chapterTotal = book.chapters.length,
+  chapterTotal = book.chapterCount,
   volumeCounts,
 }: {
   user: SessionUser;

@@ -31,7 +31,7 @@ src/
 public/
   css/ js/            源文件 + predeploy 生成的压缩哈希副本
   _headers            静态资源长缓存头
-migrations/           D1 迁移 SQL（0001 ~ 0012）
+migrations/           D1 迁移 SQL（0001 ~ 0014）
 scripts/              构建、造数、备份回填、压测脚本
 docs/                代码审计与优化方案
 ```
@@ -188,6 +188,32 @@ node scripts/backfill-body-html.mjs --remote
 | `npm run data:stress` | 生成压测数据（默认写入本地 D1） |
 | `npm run stress:run` | 对指定地址压测，如 `-- --base=https://example.com` |
 
+## 最近更新（性能优化）
+
+**功能修复**
+
+- 修复「继续阅读」恒为空：`getLatestProgress` 的 SQL 补上缺失的 `WHERE p.user_id = ?`。
+- TXT 导入上限由 200 万字提升到 500 万字。
+- 分类改名时自动把原分类下所有书籍的 `category` 一并改成新名称（同一次 batch 提交，不改 `updated_at`）。
+
+**读路径**
+
+- 书籍列表（首页 / 分类 / 作者 / 后台书架）改为一次 `db.batch` 取「书籍 + 章节聚合 + 分卷」，不再把整本目录读回 Worker；`Book` 新增 `chapterCount` / `words` / `firstChapterTitle`。
+- 分页列表的总数与数据查询合并为一次 batch，只有页码越界才补查。
+- 章节页用一条 SQL 连带书籍、卷与上下章，并与页面骨架、阅读进度并发请求。
+- 搜索的 LIKE 兜底只取命中位置附近 140 字，不再回传整篇正文。
+
+**写路径**
+
+- 章节保存 / 删除 / 导入时把 `assignOrphanChapters`、`touchBook` 并入同一 batch；TXT 导入分批由 50 提升到 200。
+- 点赞切换 4 次往返 → 2 次；后台讨论计数 3 条 `COUNT` → 1 条 `GROUP BY`；后台概览 4 次查询 → 1 次 batch。
+
+**缓存与索引**
+
+- 边缘缓存只在存在登录会话 Cookie 时短路，访问口令 Cookie 不再让缓存失效；sitemap / RSS 也进入边缘缓存；路由声明的 `no-store` 会被尊重。
+- 进程内缓存合并同 key 的并发查询，搜索缓存单独限额，避免被爬虫查询挤出。
+- `0013` 让章节重排不再重建全文索引，`0014` 删除被覆盖的冗余索引。
+
 ## 数据迁移说明
 
 | 迁移 | 内容 |
@@ -198,6 +224,8 @@ node scripts/backfill-body-html.mjs --remote
 | `0007` / `0009` ~ `0011` | 性能索引 |
 | `0008_password_resets.sql` | 找回密码令牌 |
 | `0012_chapter_body_html.sql` | 章节正文预渲染缓存列，**必需** |
+| `0013_reorder_perf.sql` | 章节重排触发器只监听标题 / 正文，新增按书查阅读进度索引 |
+| `0014_redundant_indexes.sql` | 删除被更长索引覆盖的冗余索引 |
 
 迁移按文件名顺序执行，Wrangler 用 `d1_migrations` 表记录已应用项；不要删除已应用的迁移或重排编号。
 

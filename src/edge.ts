@@ -1,8 +1,9 @@
 import type { MiddlewareHandler } from 'hono';
+import { SESSION_COOKIE } from './auth';
 import type { Env, Variables } from './env';
 
 /**
- * 匿名 HTML 边缘缓存：放在站点路由之前，只缓存「没有 Cookie 的 GET 页面」。
+ * 匿名页面边缘缓存：放在站点路由之前，只缓存「没有登录 Cookie 的 GET 页面」。
  * 登录态、阅读进度、后台和接口都跳过，避免把个性化内容缓存成公共页面。
  *
  * Cache API 不支持 stale-while-revalidate，这里手工实现：
@@ -44,8 +45,9 @@ export const edgeCache: MiddlewareHandler<{ Bindings: Env; Variables: Variables 
     return;
   }
   if (c.req.method !== 'GET') return next();
-  // 带 Cookie 就是登录 / 口令 / 个性化请求，直接回源
-  if (c.req.header('cookie')) return next();
+  // 只有登录态会改变页面内容；口令 Cookie、统计脚本等其它 Cookie 不该让缓存整体失效
+  const cookie = c.req.header('cookie') ?? '';
+  if (cookie.includes(`${SESSION_COOKIE}=`)) return next();
 
   // DOM lib 的 CacheStorage 没有 default 声明，workers-types 里才有，这里显式收窄
   const cache = (caches as unknown as { default: Cache }).default;
@@ -69,12 +71,19 @@ export const edgeCache: MiddlewareHandler<{ Bindings: Env; Variables: Variables 
 
   const res = c.res;
   if (res.status !== 200) return;
-  if (!(res.headers.get('content-type') ?? '').includes('text/html')) return;
+  const type = res.headers.get('content-type') ?? '';
+  // HTML 之外只缓存 sitemap / RSS 这类纯静态输出
+  if (!/text\/html|application\/(?:xml|rss\+xml)/.test(type)) return;
   // 响应要写 Cookie 时不缓存
   if (res.headers.get('set-cookie')) return;
+  // 路由自己声明了 no-store（口令页等）就尊重它
+  if ((res.headers.get('cache-control') ?? '').includes('no-store')) return;
 
   const headers = new Headers(res.headers);
-  headers.set('cache-control', `public, max-age=${TTL}, stale-while-revalidate=${STALE - TTL}`);
+  // XML 自带十分钟的 cache-control，保留路由的声明，只用时间戳判断新鲜度
+  if (type.includes('text/html')) {
+    headers.set('cache-control', `public, max-age=${TTL}, stale-while-revalidate=${STALE - TTL}`);
+  }
   headers.set(STAMP, String(Math.floor(Date.now() / 1000)));
   const copy = new Response(res.clone().body, { status: 200, headers });
   c.executionCtx.waitUntil(cache.put(key, copy));

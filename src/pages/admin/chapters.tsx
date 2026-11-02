@@ -55,10 +55,16 @@ export function ChapterFormPage({
         </div>
         <div class="admin-panel-body">
           <form class="admin-form" method="post" action={`/admin/books/${book.id}/chapters`}>
+            <input type="hidden" name="mode" value={isNew ? 'new' : 'edit'} />
             <div class="admin-form-grid">
               <label class="admin-field">
                 <span>章节序号</span>
                 <input name="idx" type="number" min="1" value={String(chapter.idx)} readonly={!isNew} required />
+                {isNew ? (
+                  <span class="admin-hint">
+                    该序号已有章节时，新章插在它前面，后面的章节序号统一加 1（评论与阅读进度同步后移）。
+                  </span>
+                ) : null}
               </label>
               <label class="admin-field">
                 <span>标题</span>

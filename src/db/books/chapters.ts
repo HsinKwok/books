@@ -1,11 +1,14 @@
 import {
   CHAPTER_COLS,
   CHAPTER_COLS_LITE,
+  type Book,
+  type BookRow,
+  type BookStatus,
   type Chapter,
   type ChapterRow,
   type Volume,
 } from '../types';
-import { type ChapterLiteRow, toChapter, withVolumeNos } from '../rows';
+import { type ChapterLiteRow, toBook, toChapter, toChapterLite, withVolumeNos } from '../rows';
 import { clampPage } from '../paging';
 
 export async function getChapters(
@@ -59,25 +62,42 @@ export async function getChapterStats(db: D1Database, bookId: number): Promise<C
   return volumeCounts(db, bookId, { includeDrafts: true });
 }
 
-/** 后台章节表按页取：草稿也要显示，页码由 clampPage 夹到有效范围 */
+/**
+ * 后台章节表按页取：草稿也要显示，页码由 clampPage 夹到有效范围。
+ * stats 可由调用方先并发取好传进来，省一次往返。
+ */
 export async function getChaptersPage(
   db: D1Database,
   bookId: number,
   rawPage: unknown,
   perPage = ADMIN_CHAPTERS_PER_PAGE,
+  stats?: ChapterStats,
 ): Promise<{ chapters: Chapter[]; page: number; pages: number; stats: ChapterStats }> {
-  const stats = await getChapterStats(db, bookId);
-  const paging = clampPage(rawPage, stats.total, perPage);
-  if (!stats.total) return { chapters: [], page: paging.page, pages: paging.pages, stats };
+  const counts = stats ?? (await getChapterStats(db, bookId));
+  const paging = clampPage(rawPage, counts.total, perPage);
+  if (!counts.total) return { chapters: [], page: paging.page, pages: paging.pages, stats: counts };
+
+  // 有卷时才需要卷内序号：窗口函数按全书算，翻页后也不会从 1 重数
+  const hasVolumes = Object.keys(counts.byVolume).some((key) => key !== 'none');
+  const cols = hasVolumes
+    ? `${CHAPTER_COLS_LITE}, ROW_NUMBER() OVER (PARTITION BY volume_id ORDER BY idx) AS volume_no`
+    : CHAPTER_COLS_LITE;
 
   const { results } = await db
     .prepare(
-      `SELECT ${CHAPTER_COLS_LITE} FROM chapters
+      `SELECT ${cols} FROM chapters
         WHERE book_id = ? ORDER BY idx LIMIT ? OFFSET ?`,
     )
     .bind(bookId, paging.perPage, paging.offset)
-    .all<ChapterLiteRow>();
-  return { chapters: withVolumeNos(results), page: paging.page, pages: paging.pages, stats };
+    .all<ChapterLiteRow & { volume_no?: number }>();
+  return {
+    chapters: results.map((row) =>
+      toChapterLite(row, row.volume_id ? (row.volume_no ?? 0) : 0),
+    ),
+    page: paging.page,
+    pages: paging.pages,
+    stats: counts,
+  };
 }
 
 export async function hasChapter(db: D1Database, bookId: number, idx: number): Promise<boolean> {
@@ -154,6 +174,8 @@ export async function countBookChapters(db: D1Database, bookId: number): Promise
 }
 
 export type ChapterPageData = {
+  /** 书籍基本信息（章节页标题、讨论开关都要用），跟正文一次取回 */
+  book: Book;
   chapter: Chapter;
   volume: Volume | null;
   total: number;
@@ -161,10 +183,31 @@ export type ChapterPageData = {
   next?: ChapterLink;
 };
 
+type ChapterPageRow = BookRow & {
+  cid: number;
+  book_id: number;
+  idx: number;
+  volume_id: number | null;
+  ctitle: string;
+  body: string;
+  body_html: string | null;
+  body_hash: string | null;
+  words: number;
+  cstatus: BookStatus;
+  c_updated_at: number;
+  volume_title: string | null;
+  volume_idx: number | null;
+  total: number;
+  volume_pos: number;
+  prev_idx: number | null;
+  prev_title: string | null;
+  next_idx: number | null;
+  next_title: string | null;
+};
+
 /**
- * 章节页一次取齐：正文、所属卷、章节总数、卷内序号、上下章。
- * 原有的 getChapter / getChapterNeighbors / countBookChapters / getVolumes 保留导出，
- * 如需回退可换回多次查询。
+ * 章节页一次取齐：书籍信息、正文、所属卷、章节总数、卷内序号、上下章。
+ * 原来的 getBookMetaBySlug + getChapterPage 两次往返合并成一次。
  */
 export async function getChapterPage(
   db: D1Database,
@@ -173,52 +216,62 @@ export async function getChapterPage(
 ): Promise<ChapterPageData | null> {
   const row = await db
     .prepare(
-      `SELECT c.id, c.book_id, c.idx, c.volume_id, c.title, c.body, c.body_html, c.body_hash,
-              c.words, c.status, c.updated_at,
-              (SELECT title FROM volumes v WHERE v.id = c.volume_id) AS volume_title,
-              (SELECT idx FROM volumes v WHERE v.id = c.volume_id) AS volume_idx,
+      `SELECT b.id, b.slug, b.title, b.author, b.category, b.summary, b.status, b.sort,
+              b.allow_discussion, b.featured, b.serial_status, b.cover_url, b.owner_id,
+              b.created_at, b.updated_at,
+              c.id AS cid, c.book_id, c.idx, c.volume_id, c.title AS ctitle, c.body,
+              c.body_html, c.body_hash, c.words, c.status AS cstatus,
+              c.updated_at AS c_updated_at,
+              v.title AS volume_title, v.idx AS volume_idx,
               (SELECT COUNT(*) FROM chapters x
                 WHERE x.book_id = c.book_id AND x.status = 'published') AS total,
               (SELECT COUNT(*) FROM chapters x
                 WHERE x.book_id = c.book_id AND x.status = 'published'
                   AND x.volume_id IS c.volume_id AND x.idx <= c.idx) AS volume_pos,
-              (SELECT idx FROM chapters x
+              (SELECT x.idx FROM chapters x
                 WHERE x.book_id = c.book_id AND x.status = 'published' AND x.idx < c.idx
                 ORDER BY x.idx DESC LIMIT 1) AS prev_idx,
-              (SELECT title FROM chapters x
+              (SELECT x.title FROM chapters x
                 WHERE x.book_id = c.book_id AND x.status = 'published' AND x.idx < c.idx
                 ORDER BY x.idx DESC LIMIT 1) AS prev_title,
-              (SELECT idx FROM chapters x
+              (SELECT x.idx FROM chapters x
                 WHERE x.book_id = c.book_id AND x.status = 'published' AND x.idx > c.idx
                 ORDER BY x.idx ASC LIMIT 1) AS next_idx,
-              (SELECT title FROM chapters x
+              (SELECT x.title FROM chapters x
                 WHERE x.book_id = c.book_id AND x.status = 'published' AND x.idx > c.idx
                 ORDER BY x.idx ASC LIMIT 1) AS next_title
-         FROM chapters c JOIN books b ON b.id = c.book_id
+         FROM chapters c
+         JOIN books b ON b.id = c.book_id
+         LEFT JOIN volumes v ON v.id = c.volume_id
         WHERE b.slug = ? AND c.idx = ? AND c.status = 'published'`,
     )
     .bind(slug, idx)
-    .first<
-      ChapterRow & {
-        volume_title: string | null;
-        volume_idx: number | null;
-        total: number;
-        volume_pos: number;
-        prev_idx: number | null;
-        prev_title: string | null;
-        next_idx: number | null;
-        next_title: string | null;
-      }
-    >();
+    .first<ChapterPageRow>();
   if (!row) return null;
 
-  const chapter = toChapter(row, row.volume_id === null ? 0 : row.volume_pos);
+  const chapter = toChapter(
+    {
+      id: row.cid,
+      book_id: row.book_id,
+      idx: row.idx,
+      title: row.ctitle,
+      body: row.body,
+      body_html: row.body_html,
+      body_hash: row.body_hash,
+      words: row.words,
+      status: row.cstatus,
+      updated_at: row.c_updated_at,
+      volume_id: row.volume_id,
+    },
+    row.volume_id === null ? 0 : row.volume_pos,
+  );
   const volume: Volume | null =
     row.volume_id === null || row.volume_idx === null
       ? null
       : { id: row.volume_id, idx: row.volume_idx, title: row.volume_title ?? '', intro: '' };
 
   return {
+    book: toBook(row, [], []),
     chapter,
     volume,
     total: row.total,

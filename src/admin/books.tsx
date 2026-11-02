@@ -65,8 +65,7 @@ async function removeCover(env: Env, coverUrl: string) {
   }
 }
 
-/** 分类下拉：分类表 + 书里实际出现的分类 + 兜底「未分类」
- *  改名不会同步 books.category，所以 categoryNames 会把书里出现的旧分类也列出来 */
+/** 分类下拉：分类表 + 历史数据里书上的旧分类名 + 兜底「未分类」 */
 async function filterCategories(db: D1Database): Promise<string[]> {
   const names = await categoryNames(db);
   if (!names.includes('未分类')) names.push('未分类');

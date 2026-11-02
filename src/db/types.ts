@@ -51,8 +51,25 @@ export type Book = {
   ownerId: number | null;
   createdAt: number;
   updatedAt: string;
+  /**
+   * 章节数。列表页由聚合查询直接给出，此时 chapters 可能是空数组，
+   * 所以不要再拿 chapters.length 当作全书章数。
+   */
+  chapterCount: number;
+  /** 已发布章节的总字数（列表页聚合值，省得把每章都读出来） */
+  words: number;
+  /** 首章标题，首页「继续阅读」等处用 */
+  firstChapterTitle: string;
   chapters: Chapter[];
   volumes: Volume[];
+};
+
+/** 列表页的章节聚合：一次 GROUP BY 替代读回全部章节行 */
+export type ChapterAgg = {
+  book_id: number;
+  n: number;
+  words: number;
+  first_title: string | null;
 };
 
 export type BookRow = {

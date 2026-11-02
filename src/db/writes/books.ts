@@ -119,12 +119,9 @@ export async function deleteBooks(db: D1Database, ids: number[]) {
   forget(db, 'stats', 'words', 'talk-counts');
 }
 
-export async function touchBook(db: D1Database, id: number) {
-  await db
-    .prepare('UPDATE books SET updated_at = ? WHERE id = ?')
-    .bind(Math.floor(Date.now() / 1000), id)
-    .run();
-}
+/** books.updated_at 的写语句：并进调用方的同一个 batch，省一次往返 */
+export const touchBookStatement = (db: D1Database, id: number, now: number) =>
+  db.prepare('UPDATE books SET updated_at = ? WHERE id = ?').bind(now, id);
 
 export async function slugExists(db: D1Database, slug: string, exceptId = 0) {
   const row = await db

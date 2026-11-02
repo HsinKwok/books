@@ -103,6 +103,9 @@ export function nowBook(): Book {
     ownerId: null,
     createdAt: now,
     updatedAt: '',
+    chapterCount: 0,
+    words: 0,
+    firstChapterTitle: '',
     chapters: [],
     volumes: [],
   };
@@ -146,6 +149,9 @@ export function bookFromInput(input: BookInput, id = 0, chapters: Book['chapters
     ownerId: null,
     createdAt: Math.floor(Date.now() / 1000),
     updatedAt: '',
+    chapterCount: chapters.length,
+    words: chapters.reduce((n, c) => n + c.words, 0),
+    firstChapterTitle: chapters[0]?.title ?? '',
     chapters,
     volumes: [],
   };

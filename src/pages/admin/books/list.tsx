@@ -1,5 +1,5 @@
 import type { Book } from '../../../db';
-import { formatWords } from '../../../format';
+import { bookWords, formatWords } from '../../../format';
 import type { SessionUser } from '../../../env';
 import { can } from '../../../permissions';
 import { AdminHead, AdminLayout, Badge, BulkBar } from '../layout';
@@ -66,8 +66,8 @@ export function BookTable({
                 {book.author}
                 <span class="admin-cell-sub">{book.category}</span>
               </td>
-              <td class="admin-num">{book.chapters.length}</td>
-              <td class="admin-num">{formatWords(book.chapters.reduce((n, c) => n + c.words, 0))}</td>
+              <td class="admin-num">{book.chapterCount}</td>
+              <td class="admin-num">{formatWords(bookWords(book))}</td>
               <td>
                 <Badge status={book.status} />
               </td>

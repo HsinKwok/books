@@ -85,7 +85,7 @@ export function Dashboard({
                       {book.title} <Badge status={book.status} />
                     </span>
                     <span class="admin-row-meta">
-                      {book.author} · {book.chapters.length} 章 · {isoDate(book.createdAt)}
+                      {book.author} · {book.chapterCount} 章 · {isoDate(book.createdAt)}
                     </span>
                   </a>
                 </li>

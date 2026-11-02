@@ -16,7 +16,7 @@ export type SplitResult = {
   error?: string;
 };
 
-const MAX_LENGTH = 2_000_000;
+const MAX_LENGTH = 5_000_000;
 
 /** 标题行整体长度上限，正文里「第N章……」的长句子靠这个挡掉 */
 const TITLE_LINE_MAX = 40;
@@ -453,7 +453,7 @@ function toChapter(block: Block): ParsedChapter | null {
 export function splitChapters(raw: string, options: SplitOptions = {}): SplitResult {
   if (!raw.trim()) return { volumes: [], chapters: [], error: '文本是空的。' };
   if (raw.length > MAX_LENGTH) {
-    return { volumes: [], chapters: [], error: '文本太大了（上限 200 万字）。' };
+    return { volumes: [], chapters: [], error: '文本太大了（上限 500 万字）。' };
   }
 
   const text = raw.replace(/\r\n?/g, '\n').replace(/^\uFEFF/, '');

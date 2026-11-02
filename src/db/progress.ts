@@ -62,6 +62,7 @@ export async function getLatestProgress(
            FROM reading_progress p
            JOIN books b ON b.slug = p.book_slug AND b.status = 'published'
            LEFT JOIN chapters c ON c.book_id = b.id AND c.idx = p.chapter_idx AND c.status = 'published'
+          WHERE p.user_id = ?
           ORDER BY p.updated_at DESC
           LIMIT 1`,
       )

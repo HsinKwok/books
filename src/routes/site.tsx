@@ -161,23 +161,19 @@ app.get('/b/:slug', async (c) => {
 
 app.get('/b/:slug/:idx', async (c) => {
   const db = c.env.DB;
+  const slug = c.req.param('slug');
   const idx = Number(c.req.param('idx'));
-  const [book, data] = await Promise.all([
-    getBookMetaBySlug(db, c.req.param('slug')),
-    shell(c),
-  ]);
-  if (!book) return c.notFound();
   if (!Number.isInteger(idx) || idx <= 0) return c.notFound();
+  const user = c.get('user');
 
-  // 章节页：正文、所属卷、章节总数、上下章合并为一次查询（旧函数保留作回退）
-  const page = await getChapterPage(db, book.slug, idx);
+  // 章节（含书籍信息）、页面骨架、阅读进度互不依赖，一次并发拿齐
+  const [page, data, progress] = await Promise.all([
+    getChapterPage(db, slug, idx),
+    shell(c),
+    user ? getReadingProgress(db, user.id, slug) : Promise.resolve(null),
+  ]);
   if (!page) return c.notFound();
-  const { chapter, volume, total, prev, next } = page;
-
-  // 讨论列表交给 /api/talks，这里只取阅读进度
-  const progress = data.user
-    ? await getReadingProgress(db, data.user.id, book.slug)
-    : null;
+  const { book, chapter, volume, total, prev, next } = page;
 
   return render(
     c,

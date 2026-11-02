@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppContext, Env, Variables } from '../env';
 import {
-  countDiscussions,
+  countDiscussionsByStatus,
   deleteDiscussion,
   deleteDiscussions,
   listDiscussions,
@@ -25,12 +25,7 @@ async function loadDiscussions(c: AppContext) {
   const status: 'pending' | 'approved' | 'spam' =
     param === 'approved' || param === 'spam' ? param : 'pending';
   const db = c.env.DB;
-  const [pending, approved, spam] = await Promise.all([
-    countDiscussions(db, 'pending'),
-    countDiscussions(db, 'approved'),
-    countDiscussions(db, 'spam'),
-  ]);
-  const counts = { pending, approved, spam };
+  const counts = await countDiscussionsByStatus(db);
 
   // 先按总数算出页数，再把传进来的页码夹到有效范围
   const paging = clampPage(c.req.query('page'), counts[status], PER_PAGE);

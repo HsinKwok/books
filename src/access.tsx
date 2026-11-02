@@ -94,5 +94,8 @@ export const accessGate: MiddlewareHandler<{ Bindings: Env; Variables: Variables
         next={nextPath}
       />,
     ),
+    200,
+    // 口令页不能进任何一层缓存，否则访客会一直看到它
+    { 'cache-control': 'no-store' },
   );
 };

@@ -12,6 +12,7 @@ export function readingMinutes(words: number) {
   return Math.max(1, Math.round(words / 400));
 }
 
-export function bookWords(book: { chapters: { words: number }[] }) {
-  return book.chapters.reduce((n, c) => n + c.words, 0);
+/** 字数取列表页的聚合值；没有聚合时退回按章节累加 */
+export function bookWords(book: { words?: number; chapters: { words: number }[] }) {
+  return book.words ?? book.chapters.reduce((n, c) => n + c.words, 0);
 }
