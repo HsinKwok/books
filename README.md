@@ -1,0 +1,223 @@
+# 书架 · books
+
+一个跑在 Cloudflare Workers 上的个人在线阅读站：服务端渲染、零前端框架、按需加载的 ES Module，数据存 D1，封面可选存 R2。
+
+前台提供书籍 / 分类 / 作者 / 分卷 / 章节阅读 / 搜索 / 书评 / 阅读进度同步 / RSS / Sitemap；后台提供书籍与章节管理、批量导入、分类、评论审核、用户与权限、站点设置、访问控制、数据备份。
+
+## 技术栈
+
+| 层 | 选型 |
+| --- | --- |
+| 运行时 | Cloudflare Workers（`compatibility_date` 2026-10-01） |
+| 框架 | Hono 4 + TSX 服务端渲染，无前端框架、无打包器 |
+| 数据库 | Cloudflare D1（SQLite，FTS5 全文搜索） |
+| 对象存储 | Cloudflare R2（可选，仅用于封面上传） |
+| 静态资源 | Workers Static Assets（`./public`），文件名带内容哈希，长缓存 |
+| 构建 | `scripts/predeploy.mjs`：用 esbuild 逐文件压缩 + 生成哈希副本 + `src/assets.generated.ts` |
+
+## 目录结构
+
+```
+src/
+  index.tsx           Worker 入口，挂载 session / 访问控制 / 边缘缓存 / 路由
+  routes/             前台路由：site（页面）、auth（登录注册）、api（JSON）、feeds（RSS/Sitemap）
+  admin/              后台路由：书籍、章节、分类、评论、用户、设置、运维
+  pages/              TSX 页面组件（前台 + 后台）
+  db/                 D1 数据访问，按领域拆分
+  layout.tsx          全站外壳（侧栏、主题、公告）
+  auth.ts             PBKDF2 密码哈希与会话
+  edge.ts             匿名 HTML 边缘缓存（常规 60s；章节页按版本缓存 1 天）
+  settings.ts         站点设置默认值与读写
+public/
+  css/ js/            源文件 + predeploy 生成的压缩哈希副本
+  _headers            静态资源长缓存头
+migrations/           D1 迁移 SQL（单文件 0001_init.sql）
+scripts/              构建、迁移、部署脚本
+```
+
+## 本地开发
+
+要求：Node.js **22.18+**（推荐 22 LTS 或 24）、npm。
+
+```bash
+npm ci                 # 安装依赖
+npm run db:migrate     # 建本地 D1 表结构（空库，不含演示数据）
+npm run dev            # http://localhost:8787
+```
+
+`npm run dev` 会先触发 `predev` → `npm run build`，自动生成压缩后的静态资源副本。
+
+首次打开 `http://localhost:8787/admin/setup` 创建管理员。
+
+## 部署到 Cloudflare Workers（GitHub 导入）
+
+### 1. 准备 Cloudflare 资源
+
+```bash
+npx wrangler login
+
+# 建 D1 数据库，记下输出的 database_id
+npx wrangler d1 create book
+
+# 可选：要用后台封面上传就建 R2 桶；不用可跳过
+npx wrangler r2 bucket create book-covers
+```
+
+### 2. 填写 wrangler.jsonc
+
+把占位符换成上一步的真实 ID，同时确认 Worker 名称没被占用：
+
+```jsonc
+{
+  "name": "book",                       // Worker 名，全局唯一，可改成自己的
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "book",
+      "database_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",  // ← 必填
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "COVERS", "bucket_name": "book-covers" }   // 不用 R2 就删掉这段
+  ]
+}
+```
+
+> `database_id` 还是 `00000000-...` 时部署会直接失败。
+
+### 3. 推送代码到 GitHub
+
+```bash
+git push origin main
+```
+
+### 4. 在 Cloudflare 创建 Workers 项目
+
+Dashboard → **Workers & Pages** → **Create** → **Import a repository**（连接 Git）：
+
+| 配置项 | 值 |
+| --- | --- |
+| 仓库 / 分支 | `HsinKwok/books` · `main` |
+| Root directory | 留空（仓库根目录） |
+| Build command | `npm run build` |
+| Deploy command | `npx wrangler deploy` |
+| 环境变量 | 可选 `NODE_VERSION=22` |
+
+说明：
+
+- 构建凭据由 Workers Builds 自动注入，**不需要**手动配 `CLOUDFLARE_API_TOKEN`。
+- `npm run build` 就是 `scripts/predeploy.mjs`：压缩 CSS/JS、生成带哈希的副本、刷新 `src/assets.generated.ts`。不跑这一步，线上会引用不存在的哈希文件。
+- 静态资源由 `wrangler deploy` 随 Worker 一起上传，不需要单独配置。
+
+### 5. 执行远程数据库迁移
+
+**必须先建表再访问站点**，否则页面会报 `no such table`：
+
+```bash
+npx wrangler d1 migrations apply book --remote
+```
+
+### 6. 创建管理员并完成初始化
+
+打开 `https://<你的域名>/admin/setup`，填写昵称、邮箱、密码（≥ 8 位）即可。提交后自动登录并进入后台。
+
+之后在 **后台 → 设置** 里配置站点名称、首页文案、访问模式（开放 / 口令 / 关闭）、评论审核、SMTP 发信等，全部存在 D1 的 `settings` 表，不需要改代码或环境变量。
+
+### 7. 可选
+
+- **自定义域名**：Workers → Settings → Domains & Routes → Add custom domain。
+- **邮件找回密码**：默认 `mail.enabled=0`，后台设置里填好 SMTP 后 `/forgot` 才可用；否则只返回 503。
+- **命令行部署**（不使用 Git 集成）：`npm run deploy`，会先自动执行 predeploy。
+
+## 管理员账号
+
+系统**没有任何默认账号**，也不存在默认密码：
+
+- 唯一入口是 `/admin/setup`，且只在 `users` 表中还没有 `role='owner'` 用户时可用；已有 owner 后该路径返回 404。
+- 迁移脚本里没有 `INSERT INTO users`；前台注册只会得到 `reader`。
+- 后续可在 **后台 → 用户** 把已有读者提升为 `owner`（不能改自己、不能降级最后一位 owner）。
+- 密码使用 PBKDF2-SHA256、100,000 次迭代、16 字节随机盐存储。
+
+忘记密码：配置 SMTP 后走 `/forgot`；否则只能通过数据库重置。
+
+## Fork 后的自动同步
+
+仓库自带 [`.gitattributes`](.gitattributes) 与 [`.github/workflows/sync-fork.yml`](.github/workflows/sync-fork.yml)，用于让 fork 每天自动合并上游代码，同时**保留自己的配置文件**。
+
+### 工作原理
+
+- `.gitattributes` 声明 `wrangler.jsonc merge=keepours`。
+- workflow 里注册 `git config merge.keepours.driver true`，合并时该文件始终保留当前分支版本。
+- 定时任务每天 UTC 03:00（北京时间 11:00）执行 `git fetch upstream main` → `git merge` → `git push`。
+- 通过 `if: github.event.repository.fork == true` 限制，只对 fork 生效，上游自己不会空跑。
+
+### Fork 方的操作
+
+1. fork 后在 **Actions** 页签点 “I understand my workflows, go ahead and enable them”，否则定时任务不会触发。
+2. 修改自己 fork 里的 `wrangler.jsonc`：`name` 换成自己的 Worker 名，`database_id` 换成自己 D1 的 ID。
+3. 提交并推送后，在 Actions → **Sync fork** → **Run workflow** 手动验证一次。
+
+### 注意事项
+
+- 定时任务只在**默认分支**运行；改了默认分支需要同步调整 workflow。
+- 仓库 60 天无活动时 GitHub 会自动停用定时任务，手动点一次 `Run workflow` 可恢复。
+- `merge=keepours` 只在**双方都修改了同一文件**时生效；若只有上游改了 `wrangler.jsonc`，仍会采用上游版本，建议偶尔对比一次上游配置。
+- 其他文件发生冲突时，任务会失败并停在冲突状态，需要手动解决——fork 里尽量不要改上游也在维护的业务文件。
+- 上游地址变了，改 workflow 里的 `git remote add upstream` 一行即可。
+
+## 常用命令
+
+| 命令 | 作用 |
+| --- | --- |
+| `npm run dev` | 本地开发（先自动跑 predeploy） |
+| `npm run build` | 压缩静态资源、生成哈希副本与 `assets.generated.ts` |
+| `npm run deploy` | 部署到 Cloudflare（先自动跑 predeploy；需在 `.env.local` 配账号与 token） |
+| `npm run typecheck` | TypeScript 类型检查 |
+| `npm run db:migrate` | 应用迁移到本地 D1 |
+| `npm run db:migrate:remote` | 应用迁移到线上 D1 |
+
+## 最近更新（性能优化）
+
+**功能修复**
+
+- 修复「继续阅读」恒为空：`getLatestProgress` 的 SQL 补上缺失的 `WHERE p.user_id = ?`。
+- TXT 导入上限由 200 万字提升到 500 万字。
+- 分类改名时自动把原分类下所有书籍的 `category` 一并改成新名称（同一次 batch 提交，不改 `updated_at`）。
+
+**读路径**
+
+- 书籍列表（首页 / 分类 / 作者 / 后台书架）改为一次 `db.batch` 取「书籍 + 章节聚合 + 分卷」，不再把整本目录读回 Worker；`Book` 新增 `chapterCount` / `words` / `firstChapterTitle`。
+- 分页列表的总数与数据查询合并为一次 batch，只有页码越界才补查。
+- 章节页用一条 SQL 连带书籍、卷与上下章，并与页面骨架、阅读进度并发请求。
+- 搜索的 LIKE 兜底只取命中位置附近 140 字，不再回传整篇正文。
+- 全文索引改用 `detail=none`：不存三元组位置，体积约为原来的 15%；查询拆成三元组 `AND` 匹配，再用 `instr` 精确过滤。
+
+**写路径**
+
+- 章节保存 / 删除 / 导入时把 `assignOrphanChapters`、`touchBook` 并入同一 batch；TXT 导入分批由 50 提升到 200。
+- 点赞切换 4 次往返 → 2 次；后台讨论计数 3 条 `COUNT` → 1 条 `GROUP BY`；后台概览 4 次查询 → 1 次 batch。
+
+**缓存与索引**
+
+- 边缘缓存只在存在登录会话 Cookie 时短路，访问口令 Cookie 不再让缓存失效；sitemap / RSS 也进入边缘缓存；路由声明的 `no-store` 会被尊重。
+- 章节页把「书籍更新时间 + 站点设置更新时间」拼进缓存键，正文、目录或设置一变就换 key，缓存能存一天而不需要 purge；TOC 的业务参数 `?v=` 与缓存版本参数分开，按卷请求不会串卷。
+- 可缓存响应带 `ETag`（有版本用版本号），重复访问直接回 304，省掉整包 HTML。
+- 同一 key 的并发未命中只渲染一次：领头请求写完缓存后，其余请求直接读缓存。
+- 登录态页面显式声明 `private, no-store`，不会进入共享缓存。
+- 进程内缓存合并同 key 的并发查询，搜索缓存单独限额，避免被爬虫查询挤出。
+- 章节重排不再重建全文索引，冗余索引已在初始结构中合并。
+
+## 数据迁移说明
+
+`migrations/0001_init.sql` 是完整的初始结构：账号、书库（分类 / 书 / 卷 / 章节）、全文索引与触发器、书评、阅读进度、站点设置、审计日志，以及全部索引。新数据库执行一次即可，不含任何演示数据。
+
+```bash
+npx wrangler d1 migrations apply book --remote
+```
+
+迁移按文件名顺序执行，Wrangler 用 `d1_migrations` 表记录已应用项；后续结构变更请新增 `0002_*.sql` 起的迁移文件，不要修改已应用的编号。
+
+## 备份
+
+后台 → **运维** → **导出备份**，下载 JSON 全量数据；同页可查看审计日志与 R2 状态。

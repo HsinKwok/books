@@ -1,0 +1,30 @@
+name: Sync fork
+
+# 只对 fork 生效：上游仓库自己跑没有意义
+on:
+  schedule:
+    - cron: '0 3 * * *' # 每天 UTC 03:00，北京时间 11:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    if: github.event.repository.fork == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 合并上游（配置文件保留本地）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # .gitattributes 里声明的 keepours 驱动：合并成功但保留当前分支的文件
+          git config merge.keepours.driver true
+          git remote add upstream https://github.com/HsinKwok/books.git
+          git fetch upstream main
+          git merge --no-edit upstream/main
+          git push origin HEAD:main

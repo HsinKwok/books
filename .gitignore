@@ -1,0 +1,14 @@
+node_modules/
+.wrangler/
+.dryrun/
+.screenshots/
+.trae/
+dist/
+.dev.vars
+# 本项目的 Cloudflare 凭据（每个项目一份，避免多账号串号）
+.env.local
+
+# 构建产物：scripts/predeploy.mjs 每次构建都会重新生成（带 8 位哈希的压缩副本）
+src/assets.generated.ts
+public/**/*.[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].js
+public/**/*.[0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f].css
